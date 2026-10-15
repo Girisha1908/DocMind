@@ -95,10 +95,14 @@ def evaluate(questions: list[dict]) -> dict:
 def ladder(results: dict) -> list[tuple[str, str]]:
     """The 4-step story: baseline -> fixed -> semantic -> best chunker + hybrid -> + rerank."""
     best = max(["fixed_500", "semantic", "headers"], key=lambda c: (results[f"{c}+vector"]["hit@3"], results[f"{c}+vector"]["mrr@5"]))
-    return [
+    steps = [
         ("Original DocMind", "s0_original"),
         ("1. Simple chunking", "fixed_500+vector"),
         ("2. Semantic chunking", "semantic+vector"),
+    ]
+    if best == "headers":
+        steps.append(("2b. Header-aware chunking", "headers+vector"))
+    return steps + [
         (f"3. Hybrid search ({best} chunks)", f"{best}+hybrid"),
         (f"4. Reranking ({best} chunks)", f"{best}+rerank"),
     ]

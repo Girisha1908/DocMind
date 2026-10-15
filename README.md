@@ -4,14 +4,68 @@
 
 DocMind answers employee questions from a company handbook: leave, benefits, expenses, travel and onboarding. It retrieves the three most relevant passages and has an LLM answer from those passages only, citing them.
 
-Most RAG demos stop there. This one also measures how often retrieval finds the right passage. It compares ten retrieval strategies on a hand-checked set of 50 questions, and CI fails the build if accuracy drops.
+Most RAG demos stop there. This one also measures how often retrieval finds the right passage. It compares ten retrieval strategies on a hand-checked set of 50 questions (**62.8% → 88.4% Hit@3**), and CI fails the build if accuracy drops.
 
 > **Why it matters:** if retrieval returns the wrong passage, the model still writes a confident, fluent, wrong answer. You only catch that by measuring retrieval on its own.
 
 ## Results
 
 <!-- RESULTS:START -->
-_Pending first full run. Generate with `python eval/run_retrieval.py`; the table is written to `results/latest.md`._
+### Retrieval accuracy (43 answerable questions)
+
+| Step | Strategy | Hit@3 | MRR@5 |
+|---|---|---|---|
+| Original DocMind | `s0_original` | **62.8%** | 0.622 |
+| 1. Simple chunking | `fixed_500+vector` | **74.4%** | 0.612 |
+| 2. Semantic chunking | `semantic+vector` | **67.4%** | 0.502 |
+| 2b. Header-aware chunking | `headers+vector` | **88.4%** | 0.777 |
+| 3. Hybrid search (headers chunks) | `headers+hybrid` | **74.4%** | 0.670 |
+| 4. Reranking (headers chunks) | `headers+rerank` | **83.7%** | 0.761 |
+
+#### All 10 strategies
+
+| Strategy | Hit@1 | Hit@3 | Hit@5 | MRR@5 | Hit@3 direct | Hit@3 exact_term | Hit@3 paraphrase | ms/query |
+|---|---|---|---|---|---|---|---|---|
+| `headers+vector` | 69.8% | **88.4%** | 90.7% | 0.777 | 100.0% | 100.0% | 66.7% | 326 |
+| `fixed_500+rerank` | 55.8% | **83.7%** | 86.0% | 0.680 | 90.0% | 100.0% | 66.7% | 10556 |
+| `semantic+hybrid` | 44.2% | **83.7%** | 86.0% | 0.622 | 100.0% | 100.0% | 53.3% | 208 |
+| `headers+rerank` | 65.1% | **83.7%** | 95.3% | 0.761 | 85.0% | 100.0% | 73.3% | 8899 |
+| `semantic+rerank` | 55.8% | **81.4%** | 90.7% | 0.691 | 85.0% | 87.5% | 73.3% | 10477 |
+| `fixed_500+hybrid` | 53.5% | **76.7%** | 86.0% | 0.663 | 95.0% | 100.0% | 40.0% | 250 |
+| `fixed_500+vector` | 51.2% | **74.4%** | 74.4% | 0.612 | 90.0% | 87.5% | 46.7% | 269 |
+| `headers+hybrid` | 58.1% | **74.4%** | 86.0% | 0.670 | 90.0% | 100.0% | 40.0% | 267 |
+| `semantic+vector` | 32.6% | **67.4%** | 76.7% | 0.502 | 75.0% | 75.0% | 53.3% | 202 |
+| `s0_original` | 60.5% | **62.8%** | 65.1% | 0.622 | 80.0% | 75.0% | 33.3% | 140 |
+
+#### Hardest questions (missed in top 3 by most strategies)
+
+| id | question | strategies missing it |
+|---|---|---|
+| c09 | I forgot to claim something I bought four months ago. Can I still get the money back? | 9/10 |
+| a08 | My mom is ill and I need to stay home to look after her. How many paid days a year can I take for that? | 8/10 |
+| a11 | I'm temporarily filling in as manager while ours is away. What extra pay do I get on top of my normal salary? | 8/10 |
+| c08 | I knocked part of the price off a work purchase with store points. Does the company pay me back the sticker price? | 6/10 |
+| a09 | If someone just stops showing up without telling anyone, how long before it can be treated as them quitting? | 5/10 |
+| b08 | I'm about to become a dad in Korea - how many days off am I legally owed after the baby arrives, and how soon do I have to use them? | 5/10 |
+| b11 | In the Netherlands, if I can't work because I'm unwell for a long stretch, what share of my wages keeps being paid and for how long? | 5/10 |
+| b09 | Our baby is due in mid-2026 and we live in Singapore. How much extra state-funded time off can my partner and I split between the two of us? | 5/10 |
+| a12 | One of my reports will be out for about three weeks after having a kid. Should I bring in a contractor to cover their work? | 4/10 |
+| a04 | If I leave GitLab, how long do I have to exercise my vested stock options? | 4/10 |
+
+**Headline: Hit@3 went from 62.8% (the original DocMind setup) to 88.4% (header-aware chunks + vector search), on 43 answerable questions.** That's +25.6 points, measured on the same answer key with the same embedding model.
+
+### What the data says
+
+- **The structure-aware chunker won outright.** Splitting on the handbook's own `#`/`##`/`###` headings, with the heading path prefixed to each chunk, beat every other chunker. The headings already mark where topics change, and the prefix ("Netherlands > Sick Leave") tells the embedder *which* country's page a chunk belongs to.
+- **"Semantic chunking" lost to naive fixed windows** (67.4% vs 74.4%). Splitting where neighbouring sentences' embeddings diverge cuts policy pages in odd places: lists, tables and one-line rules all look like topic changes. Its Hit@1 was the worst of all (32.6%).
+- **Hybrid search hurt the best chunker** (88.4% → 74.4%). The paraphrase questions explain why: their Hit@3 fell from 66.7% to 40.0%. BM25 promotes chunks that share everyday words with the question, and equal-weight RRF gives it as much say as the embeddings. Exact-term questions were already at 100% with vector search alone, so BM25 had nothing to add here.
+- **Hybrid did help the weaker chunkers** (semantic 67.4% → 83.7%, fixed 74.4% → 76.7%). Keyword matching makes up for chunks whose embeddings are poor.
+- **Reranking recovered most of hybrid's loss** (83.7%) and has the **best Hit@5 (95.3%)** and paraphrase score (73.3%), but it costs ~30× the latency on CPU. That's why the production default is `headers+vector`, not the reranker.
+- **The hardest questions are all paraphrases**: "I forgot to claim something I bought four months ago" never says *expense* or *90 days*. That's where the next improvement should come from, e.g. query rewriting or a stronger embedder.
+
+**Noise:** one question is worth 2.3 points of Hit@3, so gaps under ~5 points (e.g. 83.7% vs 81.4%) aren't meaningful. The production choice was made among predefined configurations on this same set, so treat 88.4% as optimistic until the human-reviewed questions are in.
+
+Latency (ms/query) was measured on a busy 4-core laptop CPU and is only comparable within the table.
 <!-- RESULTS:END -->
 
 **How to read it:** Hit@3 is the share of answerable questions where a chunk containing the gold evidence lands in the top 3 results, which is exactly what the LLM gets to see. MRR@5 rewards putting it at rank 1 rather than rank 3.
@@ -127,7 +181,7 @@ The answer eval uses Mistral Large to judge Mistral Small, so the model isn't gr
    - any strategy's Hit@3 drops more than `max_regression_pp` (3 points) below [`results/baseline.json`](results/baseline.json).
 5. Post the results table as a PR comment and job summary, and upload the JSON as an artifact.
 
-The floor was set at the first full measurement minus 5 points. Lowering it takes a commit to `thresholds.yaml`, so it shows up in review.
+The production strategy is `headers+vector` and the floor is 83% Hit@3 (the first full measurement, 88.4%, minus 5 points). Lowering it takes a commit to `thresholds.yaml`, so it shows up in review.
 
 ## Running it
 
@@ -140,7 +194,13 @@ source .venv/bin/activate       # macOS/Linux
 pip install -r requirements.txt
 ```
 
-Build the indexes once. This downloads about 200 MB of models on the first run:
+Build the indexes once. This downloads about 200 MB of models on the first run. Building all four takes a few minutes on a fast CPU, but over an hour on a busy laptop, mostly the semantic chunker. For the app alone, build just the production index:
+
+```bash
+python scripts/build_index.py headers
+```
+
+All four indexes are needed for the full eval:
 
 ```bash
 python scripts/build_index.py
@@ -209,6 +269,7 @@ notebooks/scratch/  early LangChain experiments (loaders, MMR, multi-query)
 - 43 answerable questions is a small sample. One question is worth about 2.3 points of Hit@3, so differences under about 5 points between strategies are within noise.
 - The questions were drafted with AI assistance against known passages and are being reviewed and partly rewritten by hand. That's tracked per question in `author` and `reviewed_by_human`.
 - Hit@3 measures whether the evidence was retrieved, not whether the answer was right. The answer eval covers that, but it relies on an LLM judge, which the human-agreement check calibrates.
+- Country pages crowd out global policy on vague questions. "How many weeks of paid parental leave does **GitLab** provide?" retrieves the global Leave Types page, but "…do **I** get?" returns three country pages (Australia, Luxembourg, Ireland). There are 21 country pages that all discuss parental leave, against 1 global page. The answer key doesn't yet contain this vague phrasing, so Hit@3 doesn't penalise it. That's a good candidate for the human-written questions. Possible fixes are asking for the user's country or boosting the global policy pages.
 - The corpus is a snapshot. Real handbook pages change, so the answer key is tied to commit `29350f82`.
 
 ## Credits
