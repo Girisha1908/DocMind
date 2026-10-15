@@ -1,0 +1,3 @@
+production_strategy: "headers+rerank"
+min_hit_at_3: 0.0
+max_regression_pp: 3

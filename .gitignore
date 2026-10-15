@@ -1,7 +1,15 @@
 .env
 venv/
+.venv/
 __pycache__/
 *.pyc
 .DS_Store
 .vscode/
 .idea/
+
+# build artifacts: rebuilt by scripts/build_index.py
+chroma_db/
+.cache/
+
+# local-only answer eval output (costs API calls; may be regenerated)
+results/answers.jsonl

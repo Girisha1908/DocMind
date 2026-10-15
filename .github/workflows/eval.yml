@@ -1,0 +1,62 @@
+name: Retrieval eval
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt pytest
+
+      - name: Check the answer key (evidence spans still match the corpus)
+        run: python -m pytest tests -q
+
+      - name: Cache embedding / reranker models
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/models
+            ~/.cache/huggingface
+          key: models-${{ hashFiles('docmind/config.py', 'requirements.txt') }}
+
+      - name: Build indexes (4 chunkers)
+        run: python -u scripts/build_index.py
+
+      - name: Run retrieval eval and enforce thresholds
+        id: eval
+        run: python -u eval/run_retrieval.py --check
+
+      - name: Publish results
+        if: always()
+        run: |
+          [ -f results/latest.md ] && cat results/latest.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Comment results on PR
+        if: always() && github.event_name == 'pull_request' && hashFiles('results/latest.md') != ''
+        continue-on-error: true  # fork PRs get a read-only token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file results/latest.md --edit-last --create-if-none
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: results/latest.*
