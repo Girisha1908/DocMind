@@ -219,7 +219,7 @@ MISTRAL_API_KEY=your_key_here
 ```
 
 ```bash
-streamlit run app.py                # web app: strategy picker, cited sources, upload-your-own-PDF mode
+streamlit run app.py                # web app: ask (strategy picker, cited sources), upload-your-own-PDF, evaluation dashboard
 python main.py                      # terminal chat
 python eval/run_answers.py          # answer-quality eval with LLM judge
 ```
